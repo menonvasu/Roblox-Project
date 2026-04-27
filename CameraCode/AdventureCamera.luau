@@ -1,5 +1,7 @@
 local UserInputService = game:GetService("UserInputService")
 
+local GHOST_TRANSPARENCY = 0.15
+
 local AdventureCamera = {}
 AdventureCamera.__index = AdventureCamera
 
@@ -8,7 +10,8 @@ function AdventureCamera.new(distance, height, side)
 	self.Distance = distance
 	self.Height = height
 	self.Side = side
-
+	self.GhostedParts = {}
+	
 	-- 3D Orbit variables
 	self.Yaw = 0
 	self.Pitch = 0
@@ -79,6 +82,40 @@ function AdventureCamera:_checkCollisions(rootPart, rotationCF)
 	end
 end
 
+-- Checks if character is blocking crosshair
+function AdventureCamera:_updateGhosting(rootPart)
+	local char = rootPart.Parent
+	local camera = workspace.CurrentCamera
+
+	-- 1. Reset existing ghosted parts
+	for _, part in ipairs(self.GhostedParts) do
+		if part:IsA("BasePart") then
+			part.LocalTransparencyModifier = 0
+		end
+	end
+	self.GhostedParts = {}
+
+	-- 2. Setup the "Ghosting Ray"
+	local rayOrigin = camera.CFrame.Position
+	local rayDirection = camera.CFrame.LookVector * 15
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = {char}
+
+	local result = workspace:Raycast(rayOrigin, rayDirection, params)
+
+	-- 3. If the ray hits the character, make them ghostly
+	if result then
+		for _, item in ipairs(char:GetDescendants()) do
+			if item:IsA("BasePart") then
+				item.LocalTransparencyModifier = GHOST_TRANSPARENCY 
+				table.insert(self.GhostedParts, item)
+			end
+		end
+	end
+end
+
 -- Main update loop --
 function AdventureCamera:Update(dt)
 	local rootPart = self:_getRoot()
@@ -87,6 +124,7 @@ function AdventureCamera:Update(dt)
 	self:_updateInput()
 	self:_updateCharacterRotation(rootPart)
 	self:_applyCameraTransform(rootPart, dt)
+	self:_updateGhosting(rootPart)
 end
 
 return AdventureCamera
