@@ -9,7 +9,12 @@ local States = {
 	Idle = "Idle",
 	Walking = "Walking",
 	Sprinting = "Sprinting",
-	Dashing  = "Dashing"
+	Dashing  = "Dashing",
+	
+	-- Jumping and falling states
+	Jumping = "Jumping",
+	Falling = "Falling",
+	Landing = "Landing"
 }
 
 local STATE_SPEEDS = {
@@ -18,44 +23,97 @@ local STATE_SPEEDS = {
 	[States.Sprinting] = 28,
 }
 
+local NON_LOOPING_STATES = {
+	[States.Landing] = true,
+	[States.Jumping] = true,
+}
+
 local DASH_DURATION = 0.2
 local DASH_COOLDOWN = 2
 local DASH_FORCE_STRENGTH = 80
 local NORMAL_FOV = 70
 local DASH_FOV = 90
-	
+local LANDING_THRESHOLD = 5
+
 local MovementController = {}
 MovementController.__index = MovementController
+
+-------------------------------------------------------------------------------
+-- INITIALIZATION
+-------------------------------------------------------------------------------
 
 function MovementController.new()
 	local self = setmetatable({}, MovementController)
 	
-	self.Player = player
 	self.Character = player.Character or player.CharacterAdded:Wait()
 	self.Humanoid = self.Character:WaitForChild("Humanoid")
 	
-	self.CurrentState = States.Idle
+	self.CurrentState = nil
 	self.CanDash = true
+	self.Islanding = false
 	
+	-- Attributes
+	self.Humanoid.UseJumpPower = true
+	self.Humanoid.JumpPower = 60
+	
+	-- Raycast Params
+	self.RayParams = RaycastParams.new();
+	self.RayParams.FilterType = Enum.RaycastFilterType.Exclude
+	self.RayParams.FilterDescendantsInstances = {self.Character}
+	
+	-- Setup animations
 	self.AnimationTracks = {}
 	self.ActiveTrack = nil
 	
 	local animFolder = game.ReplicatedStorage:WaitForChild("MovementAnims")
-	self.AnimationTracks[States.Walking] = self.Humanoid:LoadAnimation(animFolder.Walk)
-	
-	-- Remove animate script
-	local defaultAnimate = self.Character:FindFirstChild("Animate")
-	if defaultAnimate then
-		defaultAnimate:Destroy()
+	for _, stateName in pairs(States) do
+		local anim = animFolder:FindFirstChild(stateName)
+		if anim then
+			self.AnimationTracks[stateName] = self.Humanoid:LoadAnimation(anim)
+		end
 	end
-
+	
+	-- Cleanup defaults
+	local defaultAnimate = self.Character:FindFirstChild("Animate")
+	if defaultAnimate then defaultAnimate:Destroy() end
+	
+	--Set state to idle
+	self:_SetState(States.Idle)
 	return self
+end
+
+-------------------------------------------------------------------------------
+-- CORE LOGIC
+-------------------------------------------------------------------------------
+
+function MovementController:_IsBusy()
+	return self.CurrentState == States.Dashing or self.Islanding
+end
+
+-- Updates state based on input
+function MovementController:_UpdateStateFromInput() 
+	if self:_IsBusy() then return end 
+
+	if self.Humanoid.FloorMaterial == Enum.Material.Air then
+		self:_SetState(self:_GetAirState())
+	else
+		self:_SetState(self:_GetGroundState())
+	end
 end
 
 -- Core state logic 
 function MovementController:_SetState(newState)
 	if self.CurrentState == newState then return end
 
+	-- Handle Landing Lock
+	if newState == States.Landing then
+		self.Islanding = true
+		
+		task.delay(self.AnimationTracks[States.Landing].Length, function()
+			self.Islanding = false
+		end)
+	end
+	
 	-- Handles transitions
 	local speed = STATE_SPEEDS[newState]
 	if speed then
@@ -64,21 +122,132 @@ function MovementController:_SetState(newState)
 	
 	-- Update the tracking variable
 	self.CurrentState = newState
-	print("Movement State: " .. self.CurrentState)
 	self:_UpdateAnimation()
+end
+
+-------------------------------------------------------------------------------
+-- HELPERS
+-------------------------------------------------------------------------------
+
+function MovementController:_GetDistanceToGround()
+	local root = self.Character:FindFirstChild("HumanoidRootPart")
+	if not root then return math.huge end
+
+	local footPos = root.Position + Vector3.new(0, -2, 0)
+	local result = workspace:Raycast(footPos, Vector3.new(0, -10, 0), self.RayParams)
+
+	return result and result.Distance or math.huge
+end
+
+-- Helper function for air state
+function MovementController:_GetAirState()
+	local velocityY = self.Character.HumanoidRootPart.AssemblyLinearVelocity.Y
+	
+	if velocityY > 0 then 
+		return States.Jumping 
+	end
+	
+	local dist = self:_GetDistanceToGround()
+	if dist < LANDING_THRESHOLD and velocityY < -50 then
+		return States.Landing
+	end
+
+	return States.Falling
+end
+
+-- Helper function for ground state
+function MovementController:_GetGroundState() 
+	if self.Humanoid.MoveDirection.Magnitude > 0 then
+		local isSprinting = uis:IsKeyDown(Enum.KeyCode.LeftShift)
+		return isSprinting and States.Sprinting or States.Walking
+	end
+	return States.Idle
 end
 
 function MovementController:_UpdateAnimation()
 	local newTrack = self.AnimationTracks[self.CurrentState]
 	
-	if self.ActiveTrack and self.ActiveTrack ~= newTrack then
-		self.ActiveTrack:Stop(0.3)
-	end
-	
-	if newTrack and not newTrack.IsPlaying then
-		newTrack:Play(0.2)
+	if newTrack and self.ActiveTrack ~= newTrack then
+		local fadeTime = (self.CurrentState == States.Landing) and 0.05 or 0.3
+		
+		if self.ActiveTrack then self.ActiveTrack:Stop(fadeTime) end
+		
 		self.ActiveTrack = newTrack
+		--Only loop things that aren't land and jump animations
+		self.ActiveTrack.Looped = not NON_LOOPING_STATES[self.CurrentState]
+		self.ActiveTrack:Play(fadeTime)
+		
 	end
+	print(self.CurrentState)
+end
+
+-------------------------------------------------------------------------------
+-- DASH & VISUALS
+-------------------------------------------------------------------------------
+
+-- Handles dashing
+function MovementController:_Dash()
+	if not self.CanDash or self.CurrentState == States.Dashing then return end
+
+	self.CanDash = false
+	task.delay(DASH_COOLDOWN, function() self.CanDash = true end)
+
+	local rootPart = self.Character:WaitForChild("HumanoidRootPart")
+	local camera = workspace.CurrentCamera
+	local previousState = self.CurrentState
+
+	local dashDirection = (self.Humanoid.MoveDirection.Magnitude == 0) and rootPart.CFrame.LookVector or self.Humanoid.MoveDirection
+
+	-- FOV Effect
+	self:_ToggleDashVisuals(true, camera)
+	self:_SetState(States.Dashing)
+
+	-- Apply Physics (spawn to not block)
+	task.spawn(function() 
+		self:_ApplyForce(rootPart, dashDirection, DASH_FORCE_STRENGTH, DASH_DURATION) 
+	end)
+
+	task.wait(DASH_DURATION)
+
+	-- Cleanup visuals and state
+	self:_ToggleDashVisuals(false, camera)
+	self:_SetState(previousState)
+end
+
+-- Applies force to the player
+function MovementController:_ApplyForce(rootPart, direction, strength, duration)
+	-- Sets Force
+	local attachment = Instance.new("Attachment", rootPart)
+	local velocity = Instance.new("LinearVelocity", attachment)
+	velocity.MaxForce = 75000
+
+	velocity.VectorVelocity = direction * strength
+	velocity.Attachment0 = attachment
+
+	task.wait(duration)
+
+	-- Cleanup
+	velocity:Destroy()
+	attachment:Destroy()
+end
+
+-- Handles visual effects during dash
+function MovementController:_ToggleDashVisuals(enabled, camera)
+	if enabled then
+		-- FOV Effect
+		TweenService:Create(camera, TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {FieldOfView = DASH_FOV}):Play()
+
+		-- Ghost Effect
+		task.spawn(function()
+			for i = 1, 4 do
+				self:_CreateGhost()
+				task.wait(DASH_DURATION / 4)
+			end
+		end)
+	else 
+		-- Resets FOV
+		TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {FieldOfView = NORMAL_FOV}):Play()
+	end	
 end
 
 -- Creates a ghost of the player during dash
@@ -86,6 +255,13 @@ function MovementController:_CreateGhost()
 	-- Safety check
 	local character = player.Character
 	if not character then return end
+	
+	local ignoreFolder = workspace:FindFirstChild("CameraIgnore")
+	if not ignoreFolder then
+		ignoreFolder = Instance.new("Folder")
+		ignoreFolder.Name = "CameraIgnore"
+		ignoreFolder.Parent = workspace
+	end
 	
 	character.Archivable = true
 	local ghostModel = player.Character:Clone()
@@ -126,7 +302,7 @@ function MovementController:_CreateGhost()
 		
 	end
 	
-	ghostModel.Parent = workspace
+	ghostModel.Parent = ignoreFolder
 	-- Cleanup
 	task.delay(0.6, function()
 		ghostModel:Destroy()
@@ -134,101 +310,24 @@ function MovementController:_CreateGhost()
 	
 end
 
--- Handles visual effects during dash
-function MovementController:_ToggleDashVisuals(enabled, camera, rootPart)
-	if enabled then
-		-- FOV Effect
-		TweenService:Create(camera, TweenInfo.new(0.18, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {FieldOfView = DASH_FOV}):Play()
-		
-		-- Ghost Effect
-		task.spawn(function()
-			for i = 1, 4 do
-				self:_CreateGhost()
-				task.wait(DASH_DURATION / 4)
-			end
-		end)
-	else 
-		-- Resets FOV
-		TweenService:Create(camera, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {FieldOfView = NORMAL_FOV}):Play()
-	end	
-end
-
--- Applies force to the player
-function MovementController:_ApplyForce(rootPart, direction, strength, duration)
-	-- Sets Force
-	local attachment = Instance.new("Attachment", rootPart)
-	local velocity = Instance.new("LinearVelocity", attachment)
-	velocity.MaxForce = 1000000
-		
-	velocity.VectorVelocity = direction * strength
-	velocity.Attachment0 = attachment
-	
-	task.wait(duration)
-	
-	-- Cleanup
-	velocity:Destroy()
-	attachment:Destroy()
-end
-
--- Handles dashing
-function MovementController:_Dash()
-	if not self.CanDash or self.CurrentState == States.Dashing then return end
-	
-	self.CanDash = false
-	task.delay(DASH_COOLDOWN, function()
-		self.CanDash = true
-	end)
-	
-	local rootPart = self.Character:WaitForChild("HumanoidRootPart")
-	local camera = workspace.CurrentCamera
-	local previousState = self.CurrentState
-	
-	local dashDirection = (self.Humanoid.MoveDirection.Magnitude == 0) and rootPart.CFrame.LookVector or self.Humanoid.MoveDirection
-		
-	-- FOV Effect
-	self:_ToggleDashVisuals(true, camera, rootPart)
-	self:_SetState(States.Dashing)
-	
-	-- Apply Physics (spawn to not block)
-	task.spawn(function()
-		self:_ApplyForce(rootPart, dashDirection, DASH_FORCE_STRENGTH, DASH_DURATION)
-	end)
-	
-	task.wait(DASH_DURATION)
-	
-	-- Cleanup visuals and state
-	self:_ToggleDashVisuals(false, camera, rootPart)
-	self:_SetState(previousState)
-end
-
--- Updates state based on input
-function MovementController:_UpdateStateFromInput() 
-	if(self.CurrentState == States.Dashing) then return end
-
-	if self.Humanoid.MoveDirection.Magnitude > 0 then
-		if uis:IsKeyDown(Enum.KeyCode.LeftShift) then
-			self:_SetState(States.Sprinting)
-		else
-			self:_SetState(States.Walking)
-		end
-	else
-		self:_SetState(States.Idle)
-	end
-end
+-------------------------------------------------------------------------------
+-- PUBLIC API
+-------------------------------------------------------------------------------
 
 -- Listens for input
 function MovementController:Listener()
 	uis.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
-	
+
 		if input.KeyCode == Enum.KeyCode.Q then
 			self:_Dash()
 		end
 	end)
-	
+
 	RunService.PreSimulation:Connect(function()
 		self:_UpdateStateFromInput()
 	end)
 end
 
 return MovementController
+
