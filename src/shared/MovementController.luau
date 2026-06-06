@@ -62,15 +62,30 @@ function MovementController.new()
 	self.RayParams.FilterDescendantsInstances = {self.Character}
 	
 	-- Setup animations
-	self.AnimationTracks = {}
+	self.AnimationTracks = {
+		Normal = {},
+		Staff = {}
+	}
+	self.CurrentStance = "Normal"
 	self.ActiveTrack = nil
 	
 	local animFolder = game.ReplicatedStorage:WaitForChild("MovementAnims")
 	for _, stateName in pairs(States) do
-		local anim = animFolder:FindFirstChild(stateName)
-		if anim then
-			self.AnimationTracks[stateName] = self.Humanoid:LoadAnimation(anim)
+		local animNormal = animFolder:FindFirstChild(stateName)
+		local animStaff = animFolder:FindFirstChild("Staff_" .. stateName)
+		if animNormal then
+			self.AnimationTracks.Normal[stateName] = self.Humanoid:LoadAnimation(animNormal)
 		end
+		if animStaff then
+			self.AnimationTracks.Staff[stateName] = self.Humanoid:LoadAnimation(animStaff)
+		end
+	end
+	
+	local equipAnim = animFolder:FindFirstChild("Staff_Equip")
+	if equipAnim then
+		self.EquipTrack = self.Humanoid:LoadAnimation(equipAnim)
+		self.EquipTrack.Priority = Enum.AnimationPriority.Action
+		self.EquipTrack.Looped = false
 	end
 	
 	-- Cleanup defaults
@@ -109,7 +124,7 @@ function MovementController:_SetState(newState)
 	if newState == States.Landing then
 		self.Islanding = true
 		
-		task.delay(self.AnimationTracks[States.Landing].Length, function()
+		task.delay(self.AnimationTracks.Normal[States.Landing].Length, function()
 			self.Islanding = false
 		end)
 	end
@@ -165,7 +180,10 @@ function MovementController:_GetGroundState()
 end
 
 function MovementController:_UpdateAnimation()
-	local newTrack = self.AnimationTracks[self.CurrentState]
+	local currentStanceTable = self.AnimationTracks[self.CurrentStance]
+	if not currentStanceTable then return end
+	
+	local newTrack = currentStanceTable[self.CurrentState]
 	
 	if newTrack and self.ActiveTrack ~= newTrack then
 		local fadeTime = (self.CurrentState == States.Landing) and 0.05 or 0.3
@@ -316,6 +334,8 @@ end
 
 -- Listens for input
 function MovementController:Listener()
+	local staffStateEvent = game.ReplicatedStorage.LocalEvents.StaffStateChanged
+	
 	uis.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
 
@@ -326,6 +346,27 @@ function MovementController:Listener()
 
 	RunService.PreSimulation:Connect(function()
 		self:_UpdateStateFromInput()
+	end)
+	
+	staffStateEvent.Event:Connect(function(isEquipped)
+		if isEquipped then
+			self.CurrentStance = "Staff"
+			if self.EquipTrack then
+				self.EquipTrack:Play()	
+			end
+			print("Playing equip animation...")
+		else
+			if self.EquipTrack then
+				self.EquipTrack.TimePosition = self.EquipTrack.Length
+				self.EquipTrack:Play(0.10, 1, -1)
+			end
+			
+
+			self.CurrentStance = "Normal"
+			print("Stopping staff state...")
+		end
+		
+		self:_UpdateAnimation()
 	end)
 end
 

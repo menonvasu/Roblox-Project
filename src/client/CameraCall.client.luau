@@ -1,4 +1,4 @@
-local AdventureCamera = require(game.ReplicatedStorage.AdventureCamera)
+local AdventureCamera = require(game.ReplicatedStorage.Shared.AdventureCamera)
 local runService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 

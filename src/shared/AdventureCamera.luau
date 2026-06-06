@@ -136,7 +136,7 @@ function AdventureCamera:_UpdateVerticalShift(dt)
 		-- Snap camera height to player during high-velocity vertical movement
 		self.LastRootY = targetY
 	else
-		-- Smooth vertical tracking during exploration
+		-- Smooth vertical tracking
 		local alpha = 1 - math.pow(1 - VERTICAL_SMOOTHNESS, dt * 60)
 		self.LastRootY = self.LastRootY + (targetY - self.LastRootY) * alpha
 	end

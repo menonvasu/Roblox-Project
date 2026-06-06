@@ -1,0 +1,12 @@
+# Project place file
+/Roblox-Project.rbxlx
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+# If you store your backup binary game files here, don't push huge files to GitHub
+*.rbxl
+*.rbxm
+
+sourcemap.json
