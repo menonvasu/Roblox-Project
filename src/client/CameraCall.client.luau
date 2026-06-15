@@ -9,7 +9,7 @@ local humanoid = character:WaitForChild("Humanoid")
 humanoid.AutoRotate = false
 UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 
-adventureCam = AdventureCamera.new(13,2,2.5)
+local adventureCam = AdventureCamera.new(13,2,2.5)
 
 workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
 runService:BindToRenderStep("AdventureCameraUpdate", Enum.RenderPriority.Camera.Value, function(dt)

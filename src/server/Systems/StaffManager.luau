@@ -8,11 +8,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local toggleStaffEvent = ReplicatedStorage.Network.ToggleStaffEvent
 
 -------------------------------------------------------------------------------
--- LOCAL HELPER FUNCTIONS (Private to this module)
--------------------------------------------------------------------------------
-
-
--------------------------------------------------------------------------------
 -- INITIALIZATION
 -------------------------------------------------------------------------------
 
@@ -24,6 +19,7 @@ function StaffManager.new(player)
 	self.IsAnimating = false
 	self.StaffModel = nil
 	self.Player = player
+	self.StaffJoint = nil
 	
 	return self
 end
@@ -53,16 +49,29 @@ function StaffManager:Equip()
 	toggleStaffEvent:FireClient(self.Player, self.IsEquipped)
 	
 	task.wait(0.2)
+
+	-- Guard clause
+	local character = self.Player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        -- The player died or left during the wait
+        self.IsEquipped = false
+        return 
+    end
+
+	-- set all spell attributes
+	character:SetAttribute("PrimaryAttack", "Zoltraak")
+
+	-- clone and parent model
 	self.StaffModel = template:Clone()
-	self.StaffModel.Parent = self.Player.Character
+	self.StaffModel.Parent = character
 
-	local joint = Instance.new("RigidConstraint")
-	joint.Name = "StaffWeld"
+	self.StaffJoint = Instance.new("RigidConstraint")
+	self.StaffJoint.Name = "StaffWeld"
 
-	joint.Attachment0 = self.Player.Character:FindFirstChild("RightGripAttachment", true)
-	joint.Attachment1 = self.StaffModel.Staff:FindFirstChild("WeaponAttachment")
+	self.StaffJoint.Attachment0 = character:FindFirstChild("RightGripAttachment", true)
+	self.StaffJoint.Attachment1 = self.StaffModel.Staff:FindFirstChild("WeaponAttachment")
 
-	joint.Parent = self.Player.Character
+	self.StaffJoint.Parent = character
 	print("Staff Attached!")
 	
 end
@@ -78,7 +87,15 @@ function StaffManager:Unequip()
 	if self.StaffModel then
 		self.StaffModel:Destroy()
 		self.StaffModel = nil
+
+		self.StaffJoint:Destroy()
+		self.StaffJoint = nil
 		print("Staff Removed!")
+
+		local character = self.Player.Character
+    	if character then
+        	character:SetAttribute("PrimaryAttack", nil)
+    	end
 	end
 
 end

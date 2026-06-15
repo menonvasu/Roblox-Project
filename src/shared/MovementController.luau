@@ -68,22 +68,26 @@ function MovementController.new()
 	}
 	self.CurrentStance = "Normal"
 	self.ActiveTrack = nil
+
+	-- connections for listener
+	self.Connections = {}
 	
 	local animFolder = game.ReplicatedStorage:WaitForChild("MovementAnims")
+	local animator = self.Humanoid:WaitForChild("Animator") :: Animator
 	for _, stateName in pairs(States) do
 		local animNormal = animFolder:FindFirstChild(stateName)
 		local animStaff = animFolder:FindFirstChild("Staff_" .. stateName)
 		if animNormal then
-			self.AnimationTracks.Normal[stateName] = self.Humanoid:LoadAnimation(animNormal)
+			self.AnimationTracks.Normal[stateName] = animator:LoadAnimation(animNormal)
 		end
 		if animStaff then
-			self.AnimationTracks.Staff[stateName] = self.Humanoid:LoadAnimation(animStaff)
+			self.AnimationTracks.Staff[stateName] = animator:LoadAnimation(animStaff)
 		end
 	end
 	
 	local equipAnim = animFolder:FindFirstChild("Staff_Equip")
 	if equipAnim then
-		self.EquipTrack = self.Humanoid:LoadAnimation(equipAnim)
+		self.EquipTrack = animator:LoadAnimation(equipAnim)
 		self.EquipTrack.Priority = Enum.AnimationPriority.Action
 		self.EquipTrack.Looped = false
 	end
@@ -235,12 +239,14 @@ end
 -- Applies force to the player
 function MovementController:_ApplyForce(rootPart, direction, strength, duration)
 	-- Sets Force
-	local attachment = Instance.new("Attachment", rootPart)
-	local velocity = Instance.new("LinearVelocity", attachment)
-	velocity.MaxForce = 75000
+	local attachment = Instance.new("Attachment")
+	attachment.Parent = rootPart
 
+	local velocity = Instance.new("LinearVelocity")
+	velocity.MaxForce = 75000
 	velocity.VectorVelocity = direction * strength
 	velocity.Attachment0 = attachment
+	velocity.Parent = attachment
 
 	task.wait(duration)
 
@@ -335,8 +341,8 @@ end
 -- Listens for input
 function MovementController:Listener()
 	local staffStateEvent = game.ReplicatedStorage.LocalEvents.StaffStateChanged
-	
-	uis.InputBegan:Connect(function(input, gameProcessed)
+
+	local inputConnection = uis.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then return end
 
 		if input.KeyCode == Enum.KeyCode.Q then
@@ -344,11 +350,11 @@ function MovementController:Listener()
 		end
 	end)
 
-	RunService.PreSimulation:Connect(function()
+	local preSimulationConnection = RunService.PreSimulation:Connect(function()
 		self:_UpdateStateFromInput()
 	end)
 	
-	staffStateEvent.Event:Connect(function(isEquipped)
+	local staffStateConnection = staffStateEvent.Event:Connect(function(isEquipped)
 		if isEquipped then
 			self.CurrentStance = "Staff"
 			if self.EquipTrack then
@@ -368,6 +374,17 @@ function MovementController:Listener()
 		
 		self:_UpdateAnimation()
 	end)
+
+	table.insert(self.Connections, inputConnection) 
+	table.insert(self.Connections, preSimulationConnection)
+	table.insert(self.Connections, staffStateConnection)
+end
+
+-- Clear all connections
+function MovementController:Destroy() 
+	for _, connection in pairs(self.Connections) do
+		connection:Disconnect()
+	end
 end
 
 return MovementController

@@ -1,7 +1,7 @@
 -- Staff Services
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StaffManager = require(ReplicatedStorage.Shared.StaffManager)
+local StaffManager = require(script.Parent.StaffManager)
 
 -- Get remote event
 local toggleStaffEvent = ReplicatedStorage.Network.ToggleStaffEvent

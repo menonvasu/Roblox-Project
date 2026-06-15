@@ -32,6 +32,7 @@ function AdventureCamera.new(distance, height, side)
 	
 	-- Internal settings
 	self.Sensitivity = 0.005
+	self.RayParams = RaycastParams.new()
 	
 	-- Setup character listeners
 	local player = game.Players.LocalPlayer
@@ -43,6 +44,11 @@ function AdventureCamera.new(distance, height, side)
 	if player.Character then
 		self:_onCharacterAdded(player.Character)
 	end
+
+	-- Sets rootpart to nil if character removed
+	player.CharacterRemoving:Connect(function()
+    	self.RootPart = nil
+	end)
 	
 	return self
 end
@@ -108,19 +114,18 @@ end
 -------------------------------------------------------------------------------
 
 function AdventureCamera:_CheckCollisions(rotationCF, cameraDesiredPos)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
+	self.RayParams.FilterType = Enum.RaycastFilterType.Exclude
 	
 	-- Setup Ignore List
 	local ignoreList = {self.RootPart.Parent} 
 	local ignoreFolder = workspace:FindFirstChild("CameraIgnore")
 	if ignoreFolder then table.insert(ignoreList, ignoreFolder) end 
-	params.FilterDescendantsInstances = ignoreList
+	self.RayParams.FilterDescendantsInstances = ignoreList
 
 	-- Raycast from character to camera
 	local origin = self.RootPart.Position + Vector3.new(0, 2, 0)
 	local direction = cameraDesiredPos - origin
-	local result = workspace:Raycast(origin, direction, params)
+	local result = workspace:Raycast(origin, direction, self.RayParams)
 
 	return result and (result.Position + (result.Normal * 0.5)) or cameraDesiredPos
 end
