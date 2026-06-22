@@ -5,7 +5,7 @@ local Debris = game:GetService("Debris")
 local Zoltraak = {}
 
 -- Configuration
-local BEAM_SPEED = 200
+local BEAM_SPEED = 100
 local DAMAGE = 40
 
 -------------------------------------------------------------------------------
@@ -56,16 +56,16 @@ local function projectileFrameStepped(player, targetPos, onStep, onHit, onComple
             local stepDistance = BEAM_SPEED * dt
             local nextPos = currentPos + (direction * stepDistance)
 
-            -- Trigger step callback if passed and run client visual
-            if onStep then
-                onStep(currentPos, direction)
-            end
-
             -- cast a miniature ray from currentPos to nextPos
             local raycastResult = workspace:Raycast(currentPos, direction * stepDistance, rayParams)
             
             -- Hit registered!
             if raycastResult then
+                nextPos = raycastResult.Position
+
+                if onStep then
+                    onStep(currentPos, nextPos) 
+                end
 
                 if onHit then 
                     onHit(raycastResult)
@@ -73,6 +73,11 @@ local function projectileFrameStepped(player, targetPos, onStep, onHit, onComple
                 end
                 
                 break
+            end
+
+            -- Trigger step callback if passed and run client visual
+            if onStep then
+                onStep(currentPos, nextPos)
             end
 
             -- Update tracking variables for next frame
@@ -88,6 +93,66 @@ local function projectileFrameStepped(player, targetPos, onStep, onHit, onComple
     end)
 end
 
+local function spawnMagicCircle(circlePos, targetPos) 
+    -- create summon
+    local circleSummon = Instance.new("Part")
+    circleSummon.Size = Vector3.new(6, 6, 0.1) 
+    circleSummon.Transparency = 0.99
+    circleSummon.Anchored = true
+    circleSummon.CanCollide = false
+    circleSummon.CFrame = CFrame.lookAt(circlePos, targetPos)
+    circleSummon.CanQuery = false
+    circleSummon.Parent = Workspace
+
+     -- Front Decal 
+    local frontDecal = Instance.new("Decal")
+    frontDecal.Face = Enum.NormalId.Front 
+    frontDecal.Texture = "rbxassetid://13006927102"
+    frontDecal.Parent = circleSummon
+
+    -- Back Decal 
+    local backDecal = Instance.new("Decal")
+    backDecal.Face = Enum.NormalId.Back 
+    backDecal.Texture = "rbxassetid://13006927102"
+    backDecal.Parent = circleSummon
+    
+    Debris:AddItem(circleSummon, 1)
+end
+
+local function spawnLaserBeam() 
+    -- visual beam core 
+    local laserPart = Instance.new("Part")
+    laserPart.Material = Enum.Material.Neon
+    laserPart.Color = Color3.fromRGB(184, 217, 231)
+    laserPart.Anchored = true
+    laserPart.CanCollide = false
+    laserPart.Shape = Enum.PartType.Cylinder
+    laserPart.Parent = workspace
+
+    -- The Zoltraak envelope
+    local auraEmitter = Instance.new("ParticleEmitter")
+    auraEmitter.Texture = "rbxassetid://2527922625" 
+    auraEmitter.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 0, 255)), -- Bright magical purple core
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(80, 0, 160)), -- Deep purple
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 0, 40)) -- Dark edge
+    })
+    
+    auraEmitter.LightEmission = 0.5 
+    auraEmitter.LightInfluence = 0
+    auraEmitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 3), -- Starts wide
+        NumberSequenceKeypoint.new(1, 6)  -- Expands outward
+    })
+    
+    auraEmitter.Lifetime = NumberRange.new(0.15, 0.3) -- Short lifetime
+    auraEmitter.Rate = 300 
+    auraEmitter.Speed = NumberRange.new(0, 5) 
+    auraEmitter.SpreadAngle = Vector2.new(15, 15)
+    auraEmitter.Parent = laserPart
+
+    return laserPart
+end
 
 -------------------------------------------------------------------------------
 -- CORE LOGIC
@@ -114,21 +179,18 @@ function Zoltraak.clientRender(playerCasting, targetPos)
     local startPos, direction, circlePos = calculateSpellGeometry(playerCasting, targetPos)
     if not startPos then return end
 
-    -- circle vfx
-    local circleSummon = Instance.new("Part")
-    circleSummon.Position = circlePos
-    circleSummon.CFrame = CFrame.lookAt(circlePos, targetPos)
-    circleSummon.Parent = Workspace
-    
-    Debris:AddItem(circleSummon, 1)
+    spawnMagicCircle(circlePos, targetPos)
 
-    -- visual beam
-    local laserPart = Instance.new("Part")
-    laserPart.Parent = workspace
+    local laserPart = spawnLaserBeam()
 
     projectileFrameStepped(playerCasting, targetPos,
-        function(currentPos, direction) -- custom onStep visual
-            laserPart.CFrame = CFrame.lookAt(currentPos, currentPos + direction)
+        function(currentPos, nextPos) -- custom onStep visual
+            local midPoint = (currentPos + nextPos) / 2
+            local beamLength = (nextPos - circlePos).Magnitude
+
+            -- stretch to match step distance
+            laserPart.Size = Vector3.new(beamLength, 1.5, 1.5)
+            laserPart.CFrame = CFrame.lookAt(midPoint, nextPos) * CFrame.Angles(0, math.rad(90), 0)
         end,
         
         function(raycastResult) -- custom onHit visual

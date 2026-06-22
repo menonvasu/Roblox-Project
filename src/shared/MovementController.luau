@@ -14,13 +14,16 @@ local States = {
 	-- Jumping and falling states
 	Jumping = "Jumping",
 	Falling = "Falling",
-	Landing = "Landing"
+	Landing = "Landing",
+
+	Casting = "Casting"
 }
 
 local STATE_SPEEDS = {
 	[States.Idle] = 14,
 	[States.Walking] = 14,
 	[States.Sprinting] = 28,
+	[States.Casting] = 14,
 }
 
 local NON_LOOPING_STATES = {
@@ -34,6 +37,7 @@ local DASH_FORCE_STRENGTH = 80
 local NORMAL_FOV = 70
 local DASH_FOV = 90
 local LANDING_THRESHOLD = 5
+local CAST_SPEED = 0.25
 
 local MovementController = {}
 MovementController.__index = MovementController
@@ -95,7 +99,10 @@ function MovementController.new()
 	-- Cleanup defaults
 	local defaultAnimate = self.Character:FindFirstChild("Animate")
 	if defaultAnimate then defaultAnimate:Destroy() end
-	
+
+	self.AnimationTracks.Normal[States.Casting] = self.AnimationTracks.Normal[States.Walking]
+	self.AnimationTracks.Staff[States.Casting] = self.AnimationTracks.Staff[States.Walking]
+
 	--Set state to idle
 	self:_SetState(States.Idle)
 	return self
@@ -105,13 +112,13 @@ end
 -- CORE LOGIC
 -------------------------------------------------------------------------------
 
-function MovementController:_IsBusy()
-	return self.CurrentState == States.Dashing or self.Islanding
+function MovementController:IsBusy()
+	return self.CurrentState == States.Dashing or self.Islanding or self.CurrentState == States.Casting
 end
 
 -- Updates state based on input
 function MovementController:_UpdateStateFromInput() 
-	if self:_IsBusy() then return end 
+	if self:IsBusy() then return end 
 
 	if self.Humanoid.FloorMaterial == Enum.Material.Air then
 		self:_SetState(self:_GetAirState())
@@ -160,7 +167,8 @@ end
 
 -- Helper function for air state
 function MovementController:_GetAirState()
-	local velocityY = self.Character.HumanoidRootPart.AssemblyLinearVelocity.Y
+	local root = self.Character:FindFirstChild("HumanoidRootPart")
+	local velocityY = root.AssemblyLinearVelocity.Y
 	
 	if velocityY > 0 then 
 		return States.Jumping 
@@ -198,6 +206,12 @@ function MovementController:_UpdateAnimation()
 		--Only loop things that aren't land and jump animations
 		self.ActiveTrack.Looped = not NON_LOOPING_STATES[self.CurrentState]
 		self.ActiveTrack:Play(fadeTime)
+
+		if self.CurrentState == States.Casting then
+			self.ActiveTrack:AdjustSpeed(CAST_SPEED) -- slow legs down 
+		else
+			self.ActiveTrack:AdjustSpeed(1.0) -- restore normal speed
+		end
 		
 	end
 	print(self.CurrentState)
@@ -337,6 +351,15 @@ end
 -------------------------------------------------------------------------------
 -- PUBLIC API
 -------------------------------------------------------------------------------
+
+-- Locks or unlocks the movement state for spell casting
+function MovementController:SetCasting(isCasting) 
+	if isCasting then
+		self:_SetState(States.Casting)
+	else
+		self:_SetState(States.Idle)
+	end
+end
 
 -- Listens for input
 function MovementController:Listener()

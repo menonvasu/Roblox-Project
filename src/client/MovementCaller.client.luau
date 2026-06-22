@@ -6,11 +6,13 @@ local activeController = nil
 function setupCharacter(character) 
     if activeController then 
         activeController:Destroy()
+        _G.MovementController = nil
         activeController = nil
     end
 
     -- instantiate
     activeController = MovementController.new()
+    _G.MovementController = activeController
     activeController:Listener()
 end
 

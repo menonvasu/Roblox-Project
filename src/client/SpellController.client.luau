@@ -6,7 +6,7 @@ local currentCam = game.Workspace.CurrentCamera
 
 -- get events
 local CastSpellEvent = ReplicatedStorage.Network.CastSpellEvent
-local ReplicatedVisualsEvent = ReplicatedStorage.Network.ReplicateVisualsEvent
+local ReplicatedVisualsEvent = ReplicatedStorage.Network.ReplicatedVisualsEvent
 
 -- Range of spell
 local MAXRANGE = 120
@@ -16,42 +16,69 @@ local PlayerKeybinds = {
     PrimaryAttack = Enum.KeyCode.E
 }
 
+local isCasting = false
+
 local function handleSpellCast(_,inputState,_)
     if inputState ~= Enum.UserInputState.Begin then return end
 
+    if _G.MovementController:IsBusy() then return end
+
+    if isCasting then return end
+    isCasting = true
+
     local character = player.Character
     if not character then return end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return end 
  
     -- gets the right weapon action
     local activeAttack = character:GetAttribute("PrimaryAttack")
     if not activeAttack then return end
 
+    -- Load and play the animation on the current animator
+    local castAnim = game.ReplicatedStorage.CombatAnims.Zoltraak_Cast
+    local playTrack = animator:LoadAnimation(castAnim)
+    playTrack.Looped = false
+    
+    _G.MovementController:SetCasting(true)
+    playTrack:Play()
+
     -- calculate center point and cast ray
-    local centerPoint =  Vector2.new(currentCam.ViewportSize.X/2 , currentCam.ViewportSize.Y/2)
-    local ray = currentCam:ViewportPointToRay(centerPoint.X, centerPoint.Y)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {character}
-    local raycastResult = workspace:Raycast(ray.Origin, ray.Direction * MAXRANGE, params);
-            
-    -- get target position
-    local targetPos
-    if raycastResult then
-        targetPos = raycastResult.Position
-    else
-        targetPos = ray.Origin + ray.Direction * MAXRANGE
-    end
+    playTrack:GetMarkerReachedSignal("Release"):Once(function()
+        local centerPoint =  Vector2.new(currentCam.ViewportSize.X/2 , currentCam.ViewportSize.Y/2)
+        local ray = currentCam:ViewportPointToRay(centerPoint.X, centerPoint.Y)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = {character}
+        local raycastResult = workspace:Raycast(ray.Origin, ray.Direction * MAXRANGE, params);
+                
+        -- get target position
+        local targetPos
+        if raycastResult then
+            targetPos = raycastResult.Position
+        else
+            targetPos = ray.Origin + ray.Direction * MAXRANGE
+        end
 
-    -- get spell module
-    local spellModule = ReplicatedStorage.Shared.Spells:WaitForChild(activeAttack, 2)
-    if not spellModule then return end
-    local currentSpell = require(spellModule);
+        -- get spell module
+        local spellModule = ReplicatedStorage.Shared.Spells:WaitForChild(activeAttack, 2)
+        if not spellModule then return end
+        local currentSpell = require(spellModule);
 
-    -- render client visuals
-    currentSpell.clientRender(player, targetPos);
+        -- render client visuals
+        currentSpell.clientRender(player, targetPos);
 
-    -- cast spell event
-    CastSpellEvent:FireServer(activeAttack, targetPos)
+        -- cast spell event
+        CastSpellEvent:FireServer(activeAttack, targetPos)
+    end)
+
+    playTrack.Stopped:Once(function() 
+        _G.MovementController:SetCasting(false)
+        isCasting = false
+    end)
+
 end 
 
 ContextActionService:BindAction("CastActiveSpell", handleSpellCast, true, PlayerKeybinds.PrimaryAttack)
