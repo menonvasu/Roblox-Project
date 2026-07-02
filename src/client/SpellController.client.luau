@@ -23,9 +23,6 @@ local function handleSpellCast(_,inputState,_)
 
     if _G.MovementController:IsBusy() then return end
 
-    if isCasting then return end
-    isCasting = true
-
     local character = player.Character
     if not character then return end
 
@@ -37,45 +34,52 @@ local function handleSpellCast(_,inputState,_)
     local activeAttack = character:GetAttribute("PrimaryAttack")
     if not activeAttack then return end
 
+    if isCasting then return end
+    isCasting = true
+    _G.MovementController:SetCasting(true)
+
     -- Load and play the animation on the current animator
     local castAnim = game.ReplicatedStorage.CombatAnims.Zoltraak_Cast
     local playTrack = animator:LoadAnimation(castAnim)
     playTrack.Looped = false
-    
-    _G.MovementController:SetCasting(true)
     playTrack:Play()
 
-    -- calculate center point and cast ray
+     -- get spell module and spawn magic circle
+    local spellModule = ReplicatedStorage.Shared.Spells:WaitForChild(activeAttack, 2)
+    if not spellModule then return end
+    local currentSpell = require(spellModule);
+    
+    -- spawn
+    currentSpell.clientCharge(player)
+
+    -- wait for release
     playTrack:GetMarkerReachedSignal("Release"):Once(function()
-        local centerPoint =  Vector2.new(currentCam.ViewportSize.X/2 , currentCam.ViewportSize.Y/2)
-        local ray = currentCam:ViewportPointToRay(centerPoint.X, centerPoint.Y)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = {character}
-        local raycastResult = workspace:Raycast(ray.Origin, ray.Direction * MAXRANGE, params);
+        -- calculate center point and cast ray
+    local centerPoint =  Vector2.new(currentCam.ViewportSize.X/2 , currentCam.ViewportSize.Y/2)
+    local ray = currentCam:ViewportPointToRay(centerPoint.X, centerPoint.Y)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {character}
+    local raycastResult = workspace:Raycast(ray.Origin, ray.Direction * MAXRANGE, params);
                 
-        -- get target position
-        local targetPos
-        if raycastResult then
-            targetPos = raycastResult.Position
-        else
-            targetPos = ray.Origin + ray.Direction * MAXRANGE
-        end
-
-        -- get spell module
-        local spellModule = ReplicatedStorage.Shared.Spells:WaitForChild(activeAttack, 2)
-        if not spellModule then return end
-        local currentSpell = require(spellModule);
-
+    -- get target position
+    local targetPos = raycastResult and raycastResult.Position or (ray.Origin + ray.Direction * MAXRANGE)
+    
         -- render client visuals
-        currentSpell.clientRender(player, targetPos);
+        currentSpell.clientRender(player, targetPos)
 
         -- cast spell event
         CastSpellEvent:FireServer(activeAttack, targetPos)
     end)
 
-    playTrack.Stopped:Once(function() 
+     -- Unlock movement when the animation physically stops
+    playTrack.Stopped:Once(function()
         _G.MovementController:SetCasting(false)
+    end)
+
+    -- Unlock the actual cast capability ONLY after the full cooldown has finished
+    local cooldownDuration = currentSpell.COOLDOWN or 2
+    task.delay(cooldownDuration, function()
         isCasting = false
     end)
 

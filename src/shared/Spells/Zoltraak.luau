@@ -5,8 +5,10 @@ local Debris = game:GetService("Debris")
 local Zoltraak = {}
 
 -- Configuration
-local BEAM_SPEED = 100
+local BEAM_SPEED = 200
 local DAMAGE = 40
+Zoltraak.MAX_RANGE = 150
+Zoltraak.COOLDOWN = 2
 
 -------------------------------------------------------------------------------
 -- Helper functions(internal use only)
@@ -21,13 +23,13 @@ local function calculateSpellGeometry(caster, targetPos)
     if not staffModel then return nil end
 
     -- Get muzzle attachment
-    local muzzleAttachment = staffModel.Staff:FindFirstChild("MuzzleAttachment")
+    local muzzleAttachment = staffModel.Staff:WaitForChild("MuzzleAttachment")
     if not muzzleAttachment then return nil end
 
     -- Direction and position
     local startPos = muzzleAttachment.WorldPosition
     local direction = (targetPos - startPos).Unit
-    local circlePos = startPos + (direction * 3)
+    local circlePos = startPos 
 
     -- Return multiple values so both functions can use them
     return startPos, direction, circlePos
@@ -93,30 +95,45 @@ local function projectileFrameStepped(player, targetPos, onStep, onHit, onComple
     end)
 end
 
-local function spawnMagicCircle(circlePos, targetPos) 
-    -- create summon
+local function spawnMagicCircle(character) 
+    local staffModel = character:FindFirstChild("Staff_Model")
+    local muzzleAttachment = staffModel and staffModel.Staff:FindFirstChild("MuzzleAttachment")
+    if not muzzleAttachment then return end
+
+    -- Create circle part
     local circleSummon = Instance.new("Part")
-    circleSummon.Size = Vector3.new(6, 6, 0.1) 
-    circleSummon.Transparency = 0.99
-    circleSummon.Anchored = true
+    circleSummon.Size = Vector3.new(1, 1, 1) 
+    circleSummon.Transparency = 0.5 
+    circleSummon.Material = Enum.Material.Neon 
+    circleSummon.Color = Color3.fromRGB(0, 150, 255)
+    circleSummon.Anchored = false 
     circleSummon.CanCollide = false
-    circleSummon.CFrame = CFrame.lookAt(circlePos, targetPos)
     circleSummon.CanQuery = false
     circleSummon.Parent = Workspace
 
-     -- Front Decal 
-    local frontDecal = Instance.new("Decal")
-    frontDecal.Face = Enum.NormalId.Front 
-    frontDecal.Texture = "rbxassetid://13006927102"
-    frontDecal.Parent = circleSummon
+    -- Insert the 3D Mesh
+    local specialMesh = Instance.new("SpecialMesh")
+    specialMesh.MeshType = Enum.MeshType.FileMesh
+    specialMesh.MeshId = "rbxassetid://131419958270785" 
 
-    -- Back Decal 
-    local backDecal = Instance.new("Decal")
-    backDecal.Face = Enum.NormalId.Back 
-    backDecal.Texture = "rbxassetid://13006927102"
-    backDecal.Parent = circleSummon
+    specialMesh.Scale = Vector3.new(1, 1, 1) 
+    specialMesh.Parent = circleSummon
+
+    -- Create a local attachment inside the circle
+    local circleAttachment = Instance.new("Attachment")
+    local rightOffset = 0.1 
+    local upOffset = 0  
+    local forwardOffset = -1
+    circleAttachment.CFrame = CFrame.new(rightOffset, forwardOffset, upOffset) * CFrame.Angles(math.rad(90), 0, 0) 
+    circleAttachment.Parent = circleSummon
+
+     -- Weld the circle to the staff muzzle
+    local joint = Instance.new("RigidConstraint")
+    joint.Attachment0 = muzzleAttachment
+    joint.Attachment1 = circleAttachment
+    joint.Parent = circleSummon
     
-    Debris:AddItem(circleSummon, 1)
+    Debris:AddItem(circleSummon, 2)
 end
 
 local function spawnLaserBeam() 
@@ -131,18 +148,25 @@ local function spawnLaserBeam()
 
     -- The Zoltraak envelope
     local auraEmitter = Instance.new("ParticleEmitter")
-    auraEmitter.Texture = "rbxassetid://2527922625" 
-    auraEmitter.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 0, 255)), -- Bright magical purple core
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(80, 0, 160)), -- Deep purple
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 0, 40)) -- Dark edge
+    auraEmitter.Texture = "rbxassetid://14304899539" 
+    auraEmitter.FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4
+    auraEmitter.FlipbookMode = Enum.ParticleFlipbookMode.Loop
+    auraEmitter.FlipbookFramerate = NumberRange.new(24)
+
+    auraEmitter.LightEmission = 0.5 -- Blends out the black background
+    auraEmitter.LightInfluence = 0  -- Prevents world shadows 
+
+    -- Fade the particles out cleanly 
+    auraEmitter.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),    -- Fully opaque when spawned
+        NumberSequenceKeypoint.new(0.7, 0.2),-- Start fading near the end
+        NumberSequenceKeypoint.new(1, 1)  
     })
-    
-    auraEmitter.LightEmission = 0.5 
-    auraEmitter.LightInfluence = 0
+
+    -- Taper the size
     auraEmitter.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 3), -- Starts wide
-        NumberSequenceKeypoint.new(1, 6)  -- Expands outward
+        NumberSequenceKeypoint.new(0, 1.5),  -- Starts matching the beam width
+        NumberSequenceKeypoint.new(1, 2.5)   -- Expands slightly as it crackles outward
     })
     
     auraEmitter.Lifetime = NumberRange.new(0.15, 0.3) -- Short lifetime
@@ -158,9 +182,15 @@ end
 -- CORE LOGIC
 -------------------------------------------------------------------------------
 
+function Zoltraak.clientCharge(playerCasting) 
+    local character = playerCasting.Character
+    if not character then return end
+    spawnMagicCircle(character) -- spawn immediately on charge
+end
+
 function Zoltraak.serverCast(player, targetPos) 
     projectileFrameStepped(player, targetPos, 
-        nil, 
+        nil,
         function(raycastResult) -- custom onHit math
             local hitInstance = raycastResult.Instance
             local hitModel = hitInstance:FindFirstAncestorOfClass("Model")
@@ -179,8 +209,6 @@ function Zoltraak.clientRender(playerCasting, targetPos)
     local startPos, direction, circlePos = calculateSpellGeometry(playerCasting, targetPos)
     if not startPos then return end
 
-    spawnMagicCircle(circlePos, targetPos)
-
     local laserPart = spawnLaserBeam()
 
     projectileFrameStepped(playerCasting, targetPos,
@@ -193,7 +221,7 @@ function Zoltraak.clientRender(playerCasting, targetPos)
             laserPart.CFrame = CFrame.lookAt(midPoint, nextPos) * CFrame.Angles(0, math.rad(90), 0)
         end,
         
-        function(raycastResult) -- custom onHit visual
+        function() -- custom onHit visual
             laserPart:Destroy()
         end,
 
