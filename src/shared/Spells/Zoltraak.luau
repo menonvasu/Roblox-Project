@@ -9,6 +9,7 @@ local BEAM_SPEED = 200
 local DAMAGE = 40
 Zoltraak.MAX_RANGE = 150
 Zoltraak.COOLDOWN = 2
+Zoltraak.MANA_COST = 25
 
 -------------------------------------------------------------------------------
 -- Helper functions(internal use only)
